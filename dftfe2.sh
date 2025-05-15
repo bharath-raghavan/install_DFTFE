@@ -1,7 +1,12 @@
-#!/bin/bash
-# Installation script for DFT-FE and its dependencies
+# Installation notes for DFT-FE and its dependencies
 
 . ./env2/env.sh
+
+# All compiled with gcc 14.2!
+
+# different commit for spglib (for v2.1-rc1)
+# took scalapack from github (not tar)
+# compile elpa with openmp support (see mimic compile)
 
 # Install alglib, libxc, spglib and p4est using the typical route (cf. manual)
 function install_alglib {
@@ -58,7 +63,7 @@ function install_spglib {
   cd $WD/src
   if [ ! -d spglib ]; then
     git clone https://github.com/atztogo/spglib.git
-    cd spglib && git checkout 02159eef6e7349535049a43fe2272bb634c77945
+    cd spglib && git checkout e78c3de # v2.1.0-rc1
   fi
   cd spglib
   rm -fr build
@@ -136,19 +141,15 @@ function install_elpa {
     fi
     cd elpa
 
-    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$INST/lib
-    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$INST/lib64
-    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ROCM_PATH/lib
-
-    rm -fr build
-    mkdir build && cd build
-    ../configure CXX=hipcc CC=hipcc FC=ftn CFLAGS="-march=znver3 -fPIC -O2 $CRAY_ROCM_INCLUDE_OPTS -I$ROCM_PATH/include/rocsolver --amdgpu-target=gfx90a -I$MPICH_DIR/include" FCFLAGS="-march=znver3 -O2 -fPIC" CXXFLAGS="-std=c++17 -march=znver3 -fPIC -O2 $CRAY_ROCM_INCLUDE_OPTS -I$ROCM_PATH/include/rocsolver --amdgpu-target=gfx90a -I$MPICH_DIR/include" LIBS="-L$ROCM_PATH/lib -lamdhip64 -lrocblas -lrocsolver -L$MPICH_DIR/lib -lmpi $CRAY_XPMEM_POST_LINK_OPTS -lxpmem $PE_MPICH_GTL_DIR_amd_gfx90a $PE_MPICH_GTL_LIBS_amd_gfx90a -L$INST/lib -lscalapack -L$OLCF_OPENBLAS_ROOT/lib -lopenblas -L$INST/lib64" --enable-amd-gpu --prefix=$INST --disable-avx512 --enable-c-tests=no --enable-option-checking=fatal --enable-shared --enable-cpp-tests=no --enable-hipcub
-#              --enable-gpu-streams=amd
-    make -j16
-    make install
-    cd $WD
-}
-
+export SCALAPACK_ROOT=/lustre/orion/stf006/proj-shared/raghavan/compile/frontier/scalapack/v2.2.2/install
+/lustre/orion/stf006/proj-shared/raghavan/code/lib/elpa/v2025.01.001/configure CXX=hipcc CC=hipcc FC=ftn CFLAGS="-march=znver3 -fPIC -O2 $CRAY_ROCM_INCLUDE_OPTS -I$ROCM_PATH/include/rocsolver\
+ --amdgpu-target=gfx90a -I$MPICH_DIR/include" FCFLAGS="-march=znver3 -O2 -fPIC" CXXFLAGS="-std=c++17 -march=znver3 -fPIC -O2\
+  $CRAY_ROCM_INCLUDE_OPTS -I$ROCM_PATH/include/rocsolver --amdgpu-target=gfx90a -I$MPICH_DIR/include" LIBS="-L$ROCM_PATH/lib\
+   -lamdhip64 -lrocblas -lrocsolver -L$MPICH_DIR/lib -lmpi $CRAY_XPMEM_POST_LINK_OPTS -lxpmem $PE_MPICH_GTL_DIR_amd_gfx90a\
+    $PE_MPICH_GTL_LIBS_amd_gfx90a -L$SCALAPACK_ROOT/lib -lscalapack -L$OLCF_OPENBLAS_ROOT/lib -lopenblas " --enable-amd-gpu --prefix=$ELPA_INST\
+     --disable-avx512 --enable-c-tests=no --enable-option-checking=fatal --enable-shared --enable-cpp-tests=no --enable-hipcub --enable-openmp # with openmp support
+make -j16
+make install
 
 function install_kokkos {
   cd $WD/src
@@ -169,206 +170,26 @@ function install_kokkos {
 
 # Install latest release dealii from https://github.com/dealii/dealii
 
-function install_dealii {
-  cd $WD/src
-  ver=9.6.2
-  if [ ! -d dealii-$ver ]; then
-      wget https://github.com/dealii/dealii/releases/download/v$ver/dealii-$ver.tar.gz
-      tar xzf dealii-$ver.tar.gz 
-  fi
-  cd dealii-$ver
-  rm -fr build
-  mkdir build && cd build
-  cmake -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_FLAGS="-march=native -std=c++17" -DCMAKE_C_FLAGS=-march=native -DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=OFF         -DDEAL_II_FORCE_BUNDLED_BOOST=OFF -DDEAL_II_WITH_TASKFLOW=OFF -DKOKKOS_DIR=$INST -DCMAKE_BUILD_TYPE=Release -DDEAL_II_CXX_FLAGS_RELEASE=-O2 -DCMAKE_C_COMPILER=cc -DCMAKE_CXX_COMPILER=CC -DCMAKE_Fortran_COMPILER=ftn -DDEAL_II_WITH_TBB=OFF -DDEAL_II_COMPONENT_EXAMPLES=OFF -DDEAL_II_WITH_MPI=ON -DDEAL_II_WITH_64BIT_INDICES=ON -DP4EST_DIR=$INST -DDEAL_II_WITH_LAPACK=ON -DLAPACK_DIR="$OLCF_OPENBLAS_ROOT;$INST" -DLAPACK_FOUND=true -DLAPACK_LIBRARIES="$OLCF_OPENBLAS_ROOT/lib/libopenblas.so" -DCMAKE_INSTALL_PREFIX=$INST ..
-  make -j16 
-  make install
-  mv $INST/*.log $INST/share/deal.II/
-  mv $INST/*.md $INST/share/deal.II/
-  cd $WD
-}
-
-function install_torch {
-  PYTORCH_VERSION=1.13.1
-  PYTORCH_URL=https://github.com/pytorch/pytorch
-
-  cd $WD/src
-  enter_venv
-  pip install pyyaml pandas matplotlib scikit-learn pybind11 \
-      typing_extensions six sympy filelock jinja2 networkx
-  if [ ! -d pytorch]; then 
-      git clone --recursive $PYTORCH_URL
-      cd pytorch && git checkout v$PYTORCH_VERSION
-  fi
-  cd pytorch
-  CMAKE_PREFIX_PATH=$INST
-  CMAKE_CXX_FLAGS=-march=znver3
-  CXX=`{which g++} # note: CC adds mpi linking info.
-  CC=`{which gcc}
-  BLAS=OpenBLAS
-  OpenBLAS_HOME=$OLCF_OPENBLAS_ROOT
-  USE_CUDA=0
-  USE_ROCM=0
-  USE_CUDNN=0
-  USE_NCCL=0
-  USE_RCCL=0
-  USE_MKLDNN=0
-  USE_DISTRIBUTED=0
-  USE_OPENMP=0
-  PYTORCH_BUILD_VERSION=$PYTORCH_VERSION # to prevent dependency issues
-  PYTORCH_BUILD_NUMBER=1
-  CMAKE_BUILD_TYPE=Release
-
-  python setup.py build -j16 --cmake-only
-  cd build
-  #cmake -DBUILD_CUSTOM_PROTOBUF=0 ..
-  cmake --build . -j16 --target install
-  cd ..
-  python3 setup.py install
-
-  cd $WD
-}
-
-function compile_dftfe_debug {
-  cd $WD/src
-  if [ ! -z $1 ]; then
-    branch=$1
-  else
-    branch=migrateNewElpa
-  fi
-  if [ ! -d dftfe_$branch ]; then
-    git clone -b $branch https://dsambit@bitbucket.org/dftfedevelopers/dftfe.git dftfe_$branch
-    cd dftfe_$branch
-  else
-    cd dftfe_$branch
-    git checkout $branch
-    git pull
-  fi
-  rm -fr build
-  SRC=$PWD
-  mkdir build && cd build
-
-  dealiiDir=$INST
-  alglibDir=$INST/lib/alglib
-  libxcDir=$INST
-  spglibDir=$INST
-  xmlIncludeDir=/usr/include/libxml2
-  xmlLibDir=/usr/lib64
-
-  ELPA_PATH=$INST
-  DCCL_PATH=$ROCM_PATH
-  TORCH_PATH=$INST/venv/lib/python3.9/site-packages
-
-  #Compiler options and flags
-  cxx_compiler=CC
-  cxx_flags="-march=znver3 -fPIC -I$MPICH_DIR/include -I$ROCM_PATH/include -I$ROCM_PATH/include/hip -I$ROCM_PATH/include/hipblas -I$ROCM_PATH/include/rocblas"
-  cxx_flagsRelease=-O2 #sets DCMAKE_CXX_FLAGS_RELEASE
-  device_flags="-march=znver3 -O2 -munsafe-fp-atomics -I$MPICH_DIR/include -I$ROCM_PATH/include -I$ROCM_PATH/include/hip -I$ROCM_PATH/include/hipblas -I$ROCM_PATH/include/rocblas"
-  device_architectures=gfx90a
+ver=9.6.2
+if [ ! -d dealii-$ver ]; then
+    wget https://github.com/dealii/dealii/releases/download/v$ver/dealii-$ver.tar.gz
+    tar xzf dealii-$ver.tar.gz 
+fi
+cd dealii-$ver
+mkdir build && cd build
+cmake -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_FLAGS="-march=native -std=c++17" -DCMAKE_C_FLAGS=-march=native -DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=OFF         -DDEAL_II_FORCE_BUNDLED_BOOST=OFF -DDEAL_II_WITH_TASKFLOW=OFF -DKOKKOS_DIR=/lustre/orion/stf006/proj-shared/raghavan/compile/frontier/lib/kokkos/v4.6.00/install -DCMAKE_BUILD_TYPE=Release -DDEAL_II_CXX_FLAGS_RELEASE=-O2 -DCMAKE_C_COMPILER=cc -DCMAKE_CXX_COMPILER=CC -DCMAKE_Fortran_COMPILER=ftn -DDEAL_II_WITH_TBB=OFF -DDEAL_II_COMPONENT_EXAMPLES=OFF -DDEAL_II_WITH_MPI=ON -DDEAL_II_WITH_64BIT_INDICES=ON -DP4EST_DIR=/lustre/orion/stf006/proj-shared/raghavan/compile/frontier/lib/p4est/v2.8.7/ -DDEAL_II_WITH_LAPACK=ON -DLAPACK_DIR="$OLCF_OPENBLAS_ROOT;$SCALAPACK_ROOT" -DLAPACK_FOUND=true -DLAPACK_LIBRARIES="$OLCF_OPENBLAS_ROOT/lib/libopenblas.so" -DCMAKE_INSTALL_PREFIX=../install /lustre/orion/stf006/proj-shared/raghavan/code/lib/dealii
+mkae -j16
+make install
+mv $INST/*.log $INST/share/deal.II/
+mv $INST/*.md $INST/share/deal.II/
+cd $WD
 
 
-  # HIGHERQUAD_PSP option compiles with default or higher order
-  # quadrature for storing pseudopotential data
-  # ON is recommended for MD simulations with hard pseudopotentials
+DFTD4_PATH=/lustre/orion/stf006/proj-shared/raghavan/compile/frontier/lib/dftd4/v3.7.0/install
+SCALAPACK_ROOT=/lustre/orion/stf006/proj-shared/raghavan/compile/frontier/lib/scalapack/v2.2.2/install
+ELPA_PATH=/lustre/orion/stf006/proj-shared/raghavan/compile/frontier/lib/elpa/v2025.01.001/install
+DCCL_PATH=$ROCM_PATH/include/rccl
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$SCALAPACK_ROOT/lib
 
-  # build type: "Release" or "Debug"
-  build_type=Release
-  out=`echo "$build_type" | tr '[:upper:]' '[:lower:]'`
-
-  function cmake_real {
-    mkdir -p real && cd real
-    cmake -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_COMPILER=$cxx_compiler -DCMAKE_CXX_FLAGS="$cxx_flags" -DCMAKE_CXX_FLAGS_RELEASE="$cxx_flagsRelease" -DCMAKE_BUILD_TYPE=$build_type -DDEAL_II_DIR=$dealiiDir -DALGLIB_DIR=$alglibDir -DLIBXC_DIR=$libxcDir -DSPGLIB_DIR=$spglibDir -DXML_LIB_DIR=$xmlLibDir -DXML_INCLUDE_DIR=$xmlIncludeDir -DWITH_MDI=OFF -DMDI_PATH= -DWITH_DCCL=OFF -DWITH_TORCH=OFF -DCMAKE_PREFIX_PATH="$ELPA_PATH;$DCCL_PATH;$TORCH_PATH" -DWITH_GPU=ON -DGPU_LANG=hip -DGPU_VENDOR=amd -DWITH_GPU_AWARE_MPI=OFF -DCMAKE_HIP_FLAGS="$device_flags" -DCMAKE_HIP_ARCHITECTURES=$device_architectures -DWITH_TESTING=OFF -DMINIMAL_COMPILE=OFF -DCMAKE_SHARED_LINKER_FLAGS="-L$ROCM_PATH/lib -lamdhip64 -L$MPICH_DIR/lib -lmpi $CRAY_XPMEM_POST_LINK_OPTS -lxpmem $PE_MPICH_GTL_DIR_amd_gfx90a $PE_MPICH_GTL_LIBS_amd_gfx90a" -DHIGHERQUAD_PSP=ON -DWITH_COMPLEX=OFF $1
-    make -j16
-    cd ..
-  }
-
-  function cmake_cplx {
-    mkdir -p complex && cd complex
-    cmake -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_COMPILER=$cxx_compiler -DCMAKE_CXX_FLAGS="$cxx_flags" -DCMAKE_CXX_FLAGS_RELEASE="$cxx_flagsRelease" -DCMAKE_BUILD_TYPE=$build_type -DDEAL_II_DIR=$dealiiDir -DALGLIB_DIR=$alglibDir -DLIBXC_DIR=$libxcDir -DSPGLIB_DIR=$spglibDir -DXML_LIB_DIR=$xmlLibDir -DXML_INCLUDE_DIR=$xmlIncludeDir -DWITH_MDI=OFF -DMDI_PATH= -DWITH_DCCL=OFF -DWITH_TORCH=OFF -DCMAKE_PREFIX_PATH="$ELPA_PATH;$DCCL_PATH;$TORCH_PATH" -DWITH_GPU=ON -DGPU_LANG=hip -DGPU_VENDOR=amd -DWITH_GPU_AWARE_MPI=OFF -DCMAKE_HIP_FLAGS="$device_flags" -DCMAKE_HIP_ARCHITECTURES=$device_architectures -DWITH_TESTING=OFF -DMINIMAL_COMPILE=OFF -DCMAKE_SHARED_LINKER_FLAGS="-L$ROCM_PATH/lib -lamdhip64 -L$MPICH_DIR/lib -lmpi $CRAY_XPMEM_POST_LINK_OPTS -lxpmem $PE_MPICH_GTL_DIR_amd_gfx90a $PE_MPICH_GTL_LIBS_amd_gfx90a" -DHIGHERQUAD_PSP=ON -DWITH_COMPLEX=ON $1
-    make -j16
-    cd ..
-  }
-
-  mkdir -p $out
-  cd $out
-
-  echo Building Real executable in $build_type mode...
-  cmake_real $SRC
-
-  echo Building Complex executable in $build_type mode...
-  cmake_cplx $SRC
-
-  echo Build complete.
-  cd $WD
-}
-
-
-
-function compile_dftfe {
-  if [ ! -z $1 ]; then
-    branch=$1
-  else
-    branch=publicGithubDevelop
-  fi
-  if [ ! -d dftfe_$branch ]; then
-    git clone -b $branch https://github.com/dftfeDevelopers/dftfe dftfe_$branch
-    cd dftfe_$branch
-  else
-    cd dftfe_$branch
-    git checkout $branch
-    git pull
-  fi
-  rm -fr build
-  SRC=$PWD
-  mkdir build && cd build 
-  dealiiDir=$INST
-  alglibDir=$INST/lib/alglib
-  libxcDir=$INST
-  spglibDir=$INST
-  xmlIncludeDir=/usr/include/libxml2
-  xmlLibDir=/usr/lib64
-
-  ELPA_PATH=$INST
-  DCCL_PATH=$ROCM_PATH/include/rccl
-  TORCH_PATH=$INST/venv/lib/python3.9/site-packages
-
-  #Compiler options and flags
-  cxx_compiler=CC
-  cxx_flags="-march=znver3 -fPIC -I$MPICH_DIR/include -I$ROCM_PATH/include -I$ROCM_PATH/include/hip -I$ROCM_PATH/include/hipblas -I$ROCM_PATH/include/rocblas"
-  cxx_flagsRelease=-O2 #sets DCMAKE_CXX_FLAGS_RELEASE
-  device_flags="-march=znver3 -O2 -munsafe-fp-atomics -I$MPICH_DIR/include -I$ROCM_PATH/include -I$ROCM_PATH/include/hip -I$ROCM_PATH/include/hipblas -I$ROCM_PATH/include/rocblas"
-  device_architectures=gfx90a
-
-  # HIGHERQUAD_PSP option compiles with default or higher order
-  # quadrature for storing pseudopotential data
-  # ON is recommended for MD simulations with hard pseudopotentials
-
-  # build type: "Release" or "Debug"
-  build_type=Release
-  out=`echo "$build_type" | tr '[:upper:]' '[:lower:]'`
-
-  function cmake_real {
-    mkdir -p real && cd real
-    cmake -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_COMPILER=$cxx_compiler -DCMAKE_CXX_FLAGS="$cxx_flags" -DCMAKE_CXX_FLAGS_RELEASE="$cxx_flagsRelease" -DCMAKE_BUILD_TYPE=$build_type -DDEAL_II_DIR=$dealiiDir -DALGLIB_DIR=$alglibDir -DLIBXC_DIR=$libxcDir -DSPGLIB_DIR=$spglibDir -DXML_LIB_DIR=$xmlLibDir -DXML_INCLUDE_DIR=$xmlIncludeDir -DWITH_MDI=OFF -DMDI_PATH= -DWITH_DCCL=OFF -DWITH_TORCH=OFF -DCMAKE_PREFIX_PATH="$ELPA_PATH;$DCCL_PATH;$TORCH_PATH" -DWITH_GPU=ON -DGPU_LANG=hip -DGPU_VENDOR=amd -DWITH_GPU_AWARE_MPI=OFF -DCMAKE_HIP_FLAGS="$device_flags" -DCMAKE_HIP_ARCHITECTURES=$device_architectures -DWITH_TESTING=OFF -DMINIMAL_COMPILE=OFF -DCMAKE_SHARED_LINKER_FLAGS="-L$ROCM_PATH/lib -lamdhip64 -L$MPICH_DIR/lib -lmpi $CRAY_XPMEM_POST_LINK_OPTS -lxpmem $PE_MPICH_GTL_DIR_amd_gfx90a $PE_MPICH_GTL_LIBS_amd_gfx90a" -DHIGHERQUAD_PSP=ON -DWITH_COMPLEX=OFF -DUSE_64BIT_INT=ON $1
-    make -j16
-    cd ..
-  }
-
-  function cmake_cplx {
-    mkdir -p complex && cd complex
-    cmake -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_COMPILER=$cxx_compiler -DCMAKE_CXX_FLAGS="$cxx_flags" -DCMAKE_CXX_FLAGS_RELEASE="$cxx_flagsRelease" -DCMAKE_BUILD_TYPE=$build_type -DDEAL_II_DIR=$dealiiDir -DALGLIB_DIR=$alglibDir -DLIBXC_DIR=$libxcDir -DSPGLIB_DIR=$spglibDir -DXML_LIB_DIR=$xmlLibDir -DXML_INCLUDE_DIR=$xmlIncludeDir -DWITH_MDI=OFF -DMDI_PATH= -DWITH_DCCL=OFF -DWITH_TORCH=OFF -DCMAKE_PREFIX_PATH="$ELPA_PATH;$DCCL_PATH;$TORCH_PATH" -DWITH_GPU=ON -DGPU_LANG=hip -DGPU_VENDOR=amd -DWITH_GPU_AWARE_MPI=OFF -DCMAKE_HIP_FLAGS="$device_flags" -DCMAKE_HIP_ARCHITECTURES=$device_architectures -DWITH_TESTING=OFF -DMINIMAL_COMPILE=OFF -DCMAKE_SHARED_LINKER_FLAGS="-L$ROCM_PATH/lib -lamdhip64 -L$MPICH_DIR/lib -lmpi $CRAY_XPMEM_POST_LINK_OPTS -lxpmem $PE_MPICH_GTL_DIR_amd_gfx90a $PE_MPICH_GTL_LIBS_amd_gfx90a" -DHIGHERQUAD_PSP=ON -DWITH_COMPLEX=ON -DUSE_64BIT_INT=ON $1
-    make -j16
-    cd ..
-  }
-
-  mkdir -p $out
-  cd $out
-
-  echo Building Real executable in $build_type mode...
-  cmake_real $SRC
-
-  echo Building Complex executable in $build_type mode...
-  cmake_cplx $SRC
-
-  echo Build complete.
-  cd $WD
-}
+cmake -DCMAKE_CXX_STANDARD=17 -DCMAKE_CXX_COMPILER=$cxx_compiler -DCMAKE_CXX_FLAGS="$cxx_flags" -DCMAKE_CXX_FLAGS_RELEASE="$cxx_flagsRelease" -DCMAKE_BUILD_TYPE=$build_type -DDEAL_II_DIR=$dealiiDir -DALGLIB_DIR=$alglibDir -DLIBXC_DIR=$libxcDir -DSPGLIB_DIR=$spglibDir -DXML_LIB_DIR=$xmlLibDir -DXML_INCLUDE_DIR=$xmlIncludeDir -DWITH_MDI=OFF -DMDI_PATH= -DWITH_DCCL=OFF -DWITH_TORCH=OFF -DELPA_INCLUDE_DIR="$ELPA_PATH/include/elpa-2025.01.001/" -DCMAKE_PREFIX_PATH="$SCALAPACK_ROOT;$ELPA_PATH;$DCCL_PATH" -DWITH_GPU=ON -DGPU_LANG=hip -DGPU_VENDOR=amd -DWITH_GPU_AWARE_MPI=OFF -DCMAKE_HIP_FLAGS="$device_flags" -DCMAKE_HIP_ARCHITECTURES=$device_architectures -DWITH_TESTING=OFF -DMINIMAL_COMPILE=OFF -DCMAKE_SHARED_LINKER_FLAGS="-L$ROCM_PATH/lib -lamdhip64 -L$MPICH_DIR/lib -lmpi $CRAY_XPMEM_POST_LINK_OPTS -lxpmem $PE_MPICH_GTL_DIR_amd_gfx90a $PE_MPICH_GTL_LIBS_amd_gfx90a" -DHIGHERQUAD_PSP=ON -DWITH_COMPLEX=OFF -DUSE_64BIT_INT=ON /lustre/orion/stf006/proj-shared/raghavan/code/exe/dftfe
+make -j16
